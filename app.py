@@ -132,14 +132,20 @@ else:
             st.write("##")
             if st.button("Add 🛒", use_container_width=True):
                 p = name_map[sel_name]
-                st.session_state.cart.append({"id": p.id, "name":sel_name, "quantity":qty, "price":p.price})
-                st.rerun()
+                
+                # --- STOCK VALIDATION CHECK ---
+                if qty > p.stock_quantity:
+                    st.error(f"❌ Check stock! Only {p.stock_quantity} quantity available.")
+                else:
+                    st.session_state.cart.append({"id": p.id, "name":sel_name, "quantity":qty, "price":p.price})
+                    st.toast(f"{sel_name} added!")
+                    st.rerun()
 
         if st.session_state.cart:
             st.divider()
             st.subheader("🛒 Current Cart")
             df_cart = pd.DataFrame(st.session_state.cart)[['name', 'quantity', 'price']]
-            df_cart.index = df_cart.index + 1 # Numbering starts from 1
+            df_cart.index = df_cart.index + 1 # Numbering 1 se start
             st.table(df_cart)
             
             btn_col1, btn_col2 = st.columns(2)
@@ -157,13 +163,10 @@ else:
                 db.commit()
                 
                 pdf_data = create_pdf(st.session_state.cart, total_amt)
-                
-                # --- BILLING POPUP / SUCCESS ---
                 st.balloons()
                 st.success(f"### ✅ Transaction Complete!")
-                st.metric(label="Amount to be Paid", value=f"Rs. {total_amt}")
-                
-                st.download_button("📥 Download/Print Invoice PDF", pdf_data, "invoice.pdf", "application/pdf")
+                st.metric(label="Total Amount", value=f"Rs. {total_amt}")
+                st.download_button("📥 Download Invoice PDF", pdf_data, "invoice.pdf", "application/pdf")
                 st.session_state.cart = []
 
     # 2. INVENTORY SECTION
@@ -192,11 +195,11 @@ else:
                 st.success("Database Updated!")
         
         st.divider()
-        st.subheader("Current Stock")
+        st.subheader("Current Stock Status")
         stock_data = db.query(Product).all()
         if stock_data:
             df_stock = pd.DataFrame([{"Name": p.name, "Barcode": p.barcode, "Stock": p.stock_quantity, "Price": p.price} for p in stock_data])
-            df_stock.index = df_stock.index + 1 # Numbering starts from 1
+            df_stock.index = df_stock.index + 1
             st.dataframe(df_stock, use_container_width=True)
 
     # 3. STAFF MANAGEMENT
@@ -207,16 +210,16 @@ else:
             f_name = c1.text_input("Staff Full Name")
             u_name = c2.text_input("Username")
             p_word = c1.text_input("Password", type="password")
-            if st.form_submit_button("Create Account"):
+            if st.form_submit_button("Create Staff Account"):
                 db.add(User(username=u_name, password=p_word, role="staff", full_name=f_name))
                 db.commit()
-                st.success(f"Account for {f_name} created.")
+                st.success(f"Success! Account for {f_name} created.")
         
         st.divider()
         staff_data = db.query(User).filter(User.role == "staff").all()
         if staff_data:
             df_staff = pd.DataFrame([{"Full Name": s.full_name, "Username": s.username} for s in staff_data])
-            df_staff.index = df_staff.index + 1 # Numbering starts from 1
+            df_staff.index = df_staff.index + 1
             st.table(df_staff)
 
     if st.sidebar.button("Logout", use_container_width=True):
