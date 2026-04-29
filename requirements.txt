@@ -6,3 +6,4 @@ plotly
 fpdf
 pyzbar
 Pillow
+opencv-python-headless
