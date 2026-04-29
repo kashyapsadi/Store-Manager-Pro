@@ -1,4 +1,4 @@
-# 🛒 Smart Store Management System (Kreator Knot)
+# 🛒 Smart Store Management System
 
 A professional, full-stack Retail POS (Point of Sale) and Inventory Management System designed for small business efficiency. Built with **Streamlit** and **PostgreSQL (Neon DB)**.
 
