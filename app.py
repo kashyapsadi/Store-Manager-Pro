@@ -43,18 +43,11 @@ class Sale(Base):
 
 Base.metadata.create_all(bind=engine)
 
-# Admin Creation (One-time auto-fix)
-with SessionLocal() as session:
-    if not session.query(User).filter(User.username == "admin").first():
-        session.add(User(username="admin", password="123", role="admin", full_name="Aditya Kashyap"))
-        session.commit()
-
 def get_db():
     db = SessionLocal()
     try: return db
     finally: db.close()
 
-# --- UI UTILS ---
 def scan_barcode(image):
     try:
         decoded = decode(image)
@@ -62,7 +55,8 @@ def scan_barcode(image):
     except: pass
     return None
 
-st.set_page_config(page_title="General Store Pro", layout="wide")
+# --- UI CONFIG ---
+st.set_page_config(page_title="Store Pro Live", layout="wide")
 
 if 'logged_in' not in st.session_state:
     st.session_state.logged_in = False
@@ -79,31 +73,34 @@ if not st.session_state.logged_in:
         if st.button("Login", use_container_width=True):
             user = db.query(User).filter(User.username == u_in, User.password == p_in).first()
             if user:
-                st.session_state.logged_in, st.session_state.user, st.session_state.role, st.session_state.f_name = True, user.username, user.role, user.full_name
+                st.session_state.logged_in = True
+                st.session_state.user = user.username
+                st.session_state.role = user.role
+                st.session_state.f_name = user.full_name # Yahan Aditya Kashyap save hoga
                 st.rerun()
             else: st.error("Invalid Credentials!")
 else:
-    # --- SIDEBAR ---
-    st.sidebar.title(f"👤 {st.session_state.user}")
+    # --- SIDEBAR (Updated as per your request) ---
     if st.session_state.role == "admin":
-        st.sidebar.subheader("Aditya Kashyap") # Admin name niche dikhega
-    
+        st.sidebar.title(f"👤 {st.session_state.f_name}") # Username ki jagah Full Name
+    else:
+        st.sidebar.title(f"👤 {st.session_state.user}") # Staff ke liye username
+        
     menu = ["Billing", "Inventory", "Reports", "Staff Management"] if st.session_state.role == "admin" else ["Billing"]
     choice = st.sidebar.selectbox("Navigate Menu", menu)
 
-    # 1. BILLING (Compact)
+    # 1. BILLING SECTION (Super Compact)
     if choice == "Billing":
         st.header("🧾 POS Terminal")
-        col_s1, col_s2 = st.columns([1, 2])
-        with col_s1:
-            cam_on = st.checkbox("Scan Barcode")
+        
+        c_cam, _ = st.columns([1, 3])
+        cam_on = c_cam.checkbox("Scan Barcode")
         
         scanned_b = ""
         if cam_on:
             pic = st.camera_input("Scan", label_visibility="collapsed")
             if pic: scanned_b = scan_barcode(Image.open(pic))
 
-        col1, col2, col3 = st.columns([2, 1, 1])
         prods = db.query(Product).all()
         name_map = {p.name: p for p in prods}
         p_map = {p.barcode: p for p in prods}
@@ -112,42 +109,39 @@ else:
         if scanned_b in p_map:
             default_idx = list(name_map.keys()).index(p_map[scanned_b].name)
 
+        col1, col2, col3 = st.columns([2, 1, 1])
         with col1:
             sel_name = st.selectbox("Product", list(name_map.keys()), index=default_idx)
         with col2:
-            qty = st.number_input("Qty", min_value=1, value=1)
+            qty = st.number_input("Quantity", min_value=1, value=1)
         with col3:
-            st.write("##") # Align button
-            if st.button("Add 🛒"):
+            st.write("##") # Vertical alignment fix
+            if st.button("Add to Cart 🛒", use_container_width=True):
                 p = name_map[sel_name]
                 st.session_state.cart.append({"id": p.id, "name":sel_name, "quantity":qty, "price":p.price})
                 st.rerun()
 
         if st.session_state.cart:
-            st.table(pd.DataFrame(st.session_state.cart)[['name', 'quantity', 'price']])
-            if st.button("Finalize Sale"):
-                # Checkout logic...
-                st.success("Sale Recorded!")
-                st.session_state.cart = []
+            st.divider()
+            st.subheader("Current Order List")
+            st.dataframe(pd.DataFrame(st.session_state.cart)[['name', 'quantity', 'price']], use_container_width=True)
+            if st.button("Clear Cart"): st.session_state.cart = []; st.rerun()
 
-    # 2. INVENTORY (Compact & Fixed)
+    # 2. INVENTORY SECTION (Same compact style)
     elif choice == "Inventory":
         st.header("📦 Inventory Management")
-        
-        # Scanner for Inventory
         inv_cam = st.checkbox("Scan for Stock Update")
         inv_b = ""
         if inv_cam:
             inv_pic = st.camera_input("Scan Barcode")
             if inv_pic: inv_b = scan_barcode(Image.open(inv_pic))
 
-        with st.form("inv_form"):
+        with st.form("inv_form", clear_on_submit=True):
             c1, c2 = st.columns(2)
             name = c1.text_input("Item Name")
             barcode = c2.text_input("Barcode", value=inv_b)
             price = c1.number_input("Unit Price", min_value=0.0)
             stock = c2.number_input("Add Quantity", min_value=0)
-            
             if st.form_submit_button("Save Product to Database"):
                 exist = db.query(Product).filter(Product.barcode == barcode).first()
                 if exist:
@@ -156,30 +150,32 @@ else:
                 else:
                     db.add(Product(name=name, barcode=barcode, price=price, stock_quantity=stock))
                 db.commit()
-                st.success("Inventory Updated!")
+                st.success("Database Updated!")
         
         st.divider()
         st.subheader("Current Stock Table")
         st.dataframe(pd.DataFrame([{"ID":p.id, "Name": p.name, "Barcode": p.barcode, "Stock": p.stock_quantity, "Price": p.price} for p in db.query(Product).all()]), use_container_width=True)
 
-    # 4. STAFF MANAGEMENT
+    # 4. STAFF MANAGEMENT (Fixed Table view)
     elif choice == "Staff Management":
         st.header("👥 Staff Management")
-        with st.form("staff"):
+        with st.form("staff_reg"):
             c1, c2 = st.columns(2)
-            f_name = c1.text_input("Full Name")
+            f_name = c1.text_input("Staff Full Name")
             u_name = c2.text_input("Username")
             p_word = c1.text_input("Password", type="password")
-            if st.form_submit_button("Add Staff Account"):
+            if st.form_submit_button("Create Staff Account"):
                 db.add(User(username=u_name, password=p_word, role="staff", full_name=f_name))
                 db.commit()
-                st.success(f"Account for {f_name} created!")
+                st.success(f"Success! Account for {f_name} created.")
         
-        # Display Staff
-        staff_data = db.query(User).filter(User.role == "staff").all()
-        if staff_data:
-            st.table([{"Full Name": s.full_name, "Username": s.username} for s in staff_data])
+        st.divider()
+        st.subheader("Team List")
+        all_staff = db.query(User).filter(User.role == "staff").all()
+        if all_staff:
+            staff_list = [{"Full Name": s.full_name, "Username": s.username} for s in all_staff]
+            st.table(pd.DataFrame(staff_list))
 
-    if st.sidebar.button("Logout"):
+    if st.sidebar.button("Logout", use_container_width=True):
         st.session_state.logged_in = False
         st.rerun()
