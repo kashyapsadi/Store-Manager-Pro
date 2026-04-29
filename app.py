@@ -59,11 +59,13 @@ def create_pdf(cart, total):
     pdf = FPDF()
     pdf.add_page()
     pdf.set_font("Arial", 'B', 16)
-    pdf.cell(200, 10, "STORE INVOICE", ln=True, align='C')
+    pdf.cell(200, 10, "KREATOR KNOT - STORE INVOICE", ln=True, align='C')
     pdf.ln(10)
+    pdf.set_font("Arial", size=12)
     for item in cart:
         pdf.cell(200, 10, f"{item['name']} x {item['quantity']} = Rs.{item['price']*item['quantity']}", ln=True)
     pdf.ln(5)
+    pdf.set_font("Arial", 'B', 14)
     pdf.cell(200, 10, f"TOTAL AMOUNT: Rs.{total}", ln=True, align='R')
     return pdf.output(dest='S').encode('latin-1')
 
@@ -85,7 +87,10 @@ if not st.session_state.logged_in:
         if st.button("Login", use_container_width=True):
             user = db.query(User).filter(User.username == u_in, User.password == p_in).first()
             if user:
-                st.session_state.logged_in, st.session_state.user, st.session_state.role, st.session_state.f_name = True, user.username, user.role, user.full_name
+                st.session_state.logged_in = True
+                st.session_state.user = user.username
+                st.session_state.role = user.role
+                st.session_state.f_name = user.full_name
                 st.rerun()
             else: st.error("Invalid Credentials!")
 else:
@@ -132,10 +137,9 @@ else:
 
         if st.session_state.cart:
             st.divider()
-            st.subheader("🛒 Cart Items")
+            st.subheader("🛒 Current Cart")
             df_cart = pd.DataFrame(st.session_state.cart)[['name', 'quantity', 'price']]
-            # Indexing 1 se shuru karne ke liye
-            df_cart.index = df_cart.index + 1
+            df_cart.index = df_cart.index + 1 # Numbering starts from 1
             st.table(df_cart)
             
             btn_col1, btn_col2 = st.columns(2)
@@ -153,9 +157,14 @@ else:
                 db.commit()
                 
                 pdf_data = create_pdf(st.session_state.cart, total_amt)
-                st.download_button("📥 Download Invoice PDF", pdf_data, "invoice.pdf", "application/pdf")
+                
+                # --- BILLING POPUP / SUCCESS ---
+                st.balloons()
+                st.success(f"### ✅ Transaction Complete!")
+                st.metric(label="Amount to be Paid", value=f"Rs. {total_amt}")
+                
+                st.download_button("📥 Download/Print Invoice PDF", pdf_data, "invoice.pdf", "application/pdf")
                 st.session_state.cart = []
-                st.success("Sale Recorded Successfully!")
 
     # 2. INVENTORY SECTION
     elif choice == "Inventory":
@@ -184,12 +193,13 @@ else:
         
         st.divider()
         st.subheader("Current Stock")
-        stock_list = pd.DataFrame([{"Name": p.name, "Barcode": p.barcode, "Stock": p.stock_quantity, "Price": p.price} for p in db.query(Product).all()])
-        if not stock_list.empty:
-            stock_list.index = stock_list.index + 1
-            st.dataframe(stock_list, use_container_width=True)
+        stock_data = db.query(Product).all()
+        if stock_data:
+            df_stock = pd.DataFrame([{"Name": p.name, "Barcode": p.barcode, "Stock": p.stock_quantity, "Price": p.price} for p in stock_data])
+            df_stock.index = df_stock.index + 1 # Numbering starts from 1
+            st.dataframe(df_stock, use_container_width=True)
 
-    # 4. STAFF MANAGEMENT
+    # 3. STAFF MANAGEMENT
     elif choice == "Staff Management":
         st.header("👥 Staff Management")
         with st.form("staff_reg"):
@@ -206,7 +216,7 @@ else:
         staff_data = db.query(User).filter(User.role == "staff").all()
         if staff_data:
             df_staff = pd.DataFrame([{"Full Name": s.full_name, "Username": s.username} for s in staff_data])
-            df_staff.index = df_staff.index + 1
+            df_staff.index = df_staff.index + 1 # Numbering starts from 1
             st.table(df_staff)
 
     if st.sidebar.button("Logout", use_container_width=True):
