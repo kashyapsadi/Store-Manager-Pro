@@ -4,6 +4,8 @@ import plotly.express as px
 from fpdf import FPDF
 from pyzbar.pyzbar import decode
 from PIL import Image
+import cv2
+import numpy as np
 from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
@@ -48,11 +50,24 @@ def get_db():
     try: return db
     finally: db.close()
 
-def scan_barcode(image):
+# --- SMART SCANNER LOGIC ---
+def smart_scan(image):
     try:
-        decoded = decode(image)
-        for obj in decoded: return obj.data.decode("utf-8")
-    except: pass
+        # Image ko OpenCV format mein convert karna
+        img_array = np.array(image.convert('RGB'))
+        # Gray scale conversion taaki barcode lines saaf dikhein
+        gray = cv2.cvtColor(img_array, cv2.COLOR_BGR2GRAY)
+        
+        # Pehle gray image scan karein
+        decoded = decode(gray)
+        if not decoded:
+            # Agar fail ho toh original image try karein
+            decoded = decode(image)
+            
+        for obj in decoded: 
+            return obj.data.decode("utf-8")
+    except:
+        pass
     return None
 
 def create_pdf(cart, total):
@@ -95,11 +110,7 @@ if not st.session_state.logged_in:
             else: st.error("Invalid Credentials!")
 else:
     # --- SIDEBAR ---
-    if st.session_state.role == "admin":
-        st.sidebar.title(f"👤 {st.session_state.f_name}")
-    else:
-        st.sidebar.title(f"👤 {st.session_state.user}")
-        
+    st.sidebar.title(f"👤 {st.session_state.f_name if st.session_state.role == 'admin' else st.session_state.user}")
     menu = ["Billing", "Inventory", "Reports", "Staff Management"] if st.session_state.role == "admin" else ["Billing"]
     choice = st.sidebar.selectbox("Navigate Menu", menu)
 
@@ -108,12 +119,17 @@ else:
         st.header("🧾 POS Terminal")
         
         c_cam, _ = st.columns([1, 3])
-        cam_on = c_cam.checkbox("Scan Barcode")
+        cam_on = c_cam.checkbox("Scan Product Barcode")
         
         scanned_b = ""
         if cam_on:
-            pic = st.camera_input("Scan", label_visibility="collapsed")
-            if pic: scanned_b = scan_barcode(Image.open(pic))
+            pic = st.camera_input("Focus on Barcode & Click Take Photo", label_visibility="visible")
+            if pic:
+                scanned_b = smart_scan(Image.open(pic))
+                if not scanned_b:
+                    st.warning("⚠️ Barcode nahi mila. Thoda focus karke firse photo lein.")
+                else:
+                    st.success(f"✅ Scanned: {scanned_b}")
 
         prods = db.query(Product).all()
         name_map = {p.name: p for p in prods}
@@ -130,12 +146,10 @@ else:
             qty = st.number_input("Quantity", min_value=1, value=1)
         with col3:
             st.write("##")
-            if st.button("Add 🛒", use_container_width=True):
+            if st.button("Add to Cart 🛒", use_container_width=True):
                 p = name_map[sel_name]
-                
-                # --- STOCK VALIDATION CHECK ---
                 if qty > p.stock_quantity:
-                    st.error(f"❌ Check stock! Only {p.stock_quantity} quantity available.")
+                    st.error(f"❌ Check stock! Only {p.stock_quantity} available.")
                 else:
                     st.session_state.cart.append({"id": p.id, "name":sel_name, "quantity":qty, "price":p.price})
                     st.toast(f"{sel_name} added!")
@@ -143,16 +157,14 @@ else:
 
         if st.session_state.cart:
             st.divider()
-            st.subheader("🛒 Current Cart")
             df_cart = pd.DataFrame(st.session_state.cart)[['name', 'quantity', 'price']]
-            df_cart.index = df_cart.index + 1 # Numbering 1 se start
+            df_cart.index = df_cart.index + 1
             st.table(df_cart)
             
             btn_col1, btn_col2 = st.columns(2)
             if btn_col1.button("Clear Cart 🗑️", use_container_width=True):
                 st.session_state.cart = []
                 st.rerun()
-            
             if btn_col2.button("Generate Bill & Print 🖨️", use_container_width=True):
                 total_amt = 0
                 for item in st.session_state.cart:
@@ -161,22 +173,24 @@ else:
                     total_amt += (item['price'] * item['quantity'])
                     db.add(Sale(product_name=item['name'], quantity=item['quantity'], total_price=item['price']*item['quantity'], staff_name=st.session_state.user))
                 db.commit()
-                
-                pdf_data = create_pdf(st.session_state.cart, total_amt)
                 st.balloons()
-                st.success(f"### ✅ Transaction Complete!")
                 st.metric(label="Total Amount", value=f"Rs. {total_amt}")
-                st.download_button("📥 Download Invoice PDF", pdf_data, "invoice.pdf", "application/pdf")
+                st.download_button("📥 Download Invoice PDF", create_pdf(st.session_state.cart, total_amt), "invoice.pdf", "application/pdf")
                 st.session_state.cart = []
 
     # 2. INVENTORY SECTION
     elif choice == "Inventory":
         st.header("📦 Inventory Management")
-        inv_cam = st.checkbox("Scan for Stock Update")
+        inv_cam = st.checkbox("Scan Barcode for Stock Update")
         inv_b = ""
         if inv_cam:
-            inv_pic = st.camera_input("Scan Barcode")
-            if inv_pic: inv_b = scan_barcode(Image.open(inv_pic))
+            inv_pic = st.camera_input("Focus on Barcode & Click Take Photo")
+            if inv_pic:
+                inv_b = smart_scan(Image.open(inv_pic))
+                if inv_b:
+                    st.success(f"✅ Barcode Detected: {inv_b}")
+                else:
+                    st.warning("⚠️ Detect nahi hua, behtar light mein try karein.")
 
         with st.form("inv_form", clear_on_submit=True):
             c1, c2 = st.columns(2)
@@ -189,20 +203,20 @@ else:
                 if exist:
                     exist.stock_quantity += stock
                     exist.price = price
+                    st.success(f"Stock Updated for {exist.name}!")
                 else:
                     db.add(Product(name=name, barcode=barcode, price=price, stock_quantity=stock))
+                    st.success("New Product Added!")
                 db.commit()
-                st.success("Database Updated!")
         
         st.divider()
-        st.subheader("Current Stock Status")
         stock_data = db.query(Product).all()
         if stock_data:
             df_stock = pd.DataFrame([{"Name": p.name, "Barcode": p.barcode, "Stock": p.stock_quantity, "Price": p.price} for p in stock_data])
             df_stock.index = df_stock.index + 1
             st.dataframe(df_stock, use_container_width=True)
 
-    # 3. STAFF MANAGEMENT
+    # 4. STAFF MANAGEMENT
     elif choice == "Staff Management":
         st.header("👥 Staff Management")
         with st.form("staff_reg"):
